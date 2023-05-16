@@ -5021,6 +5021,7 @@ func (o *Object) getACL() (*s3.GetObjectAclOutput, error) {
 
 func (o *Object) setACL(acl *s3.GetObjectAclOutput) error {
 	bucket, bucketPath := o.split()
+	fs.Debugf(o, "Attempting to set ACL=%v to bucket=%s, key=%s", acl, bucket, bucketPath)
 	_, err := o.fs.c.PutObjectAcl(&s3.PutObjectAclInput{
 		AccessControlPolicy: &s3.AccessControlPolicy{
 			Grants: acl.Grants,
