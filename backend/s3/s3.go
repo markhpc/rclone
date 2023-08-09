@@ -2530,7 +2530,7 @@ type Object struct {
 	lastModified time.Time               // Last modified
 	meta         map[string]string       // The object metadata if known - may be nil - with lower case keys
 	mimeType     string                  // MimeType of object - may be ""
-        acl          *s3.AccessControlPolicy // ACL
+	acl          *s3.AccessControlPolicy // ACL
 	versionID    *string                 // If present this points to an object version
 
 	// Metadata as pointers to strings as they often won't be present
@@ -4349,9 +4349,9 @@ func (f *Fs) copyMultipart(ctx context.Context, copyReq *s3.CopyObjectInput, dst
 }
 
 func (f *Fs) copyCommon(ctx context.Context, src fs.Object, remote string, withACL bool) (fs.Object, error) {
-        if f.opt.VersionAt.IsSet() {
-                return nil, errNotWithVersionAt
-        }
+	if f.opt.VersionAt.IsSet() {
+		return nil, errNotWithVersionAt
+	}
 	dstBucket, dstPath := f.split(remote)
 	err := f.mkdirParent(ctx, remote)
 	if err != nil {
@@ -4379,9 +4379,9 @@ func (f *Fs) copyCommon(ctx context.Context, src fs.Object, remote string, withA
 
 // Copy src to this remote using server-side copy operations.
 //
-// This is stored with the remote path given
+// # This is stored with the remote path given
 //
-// It returns the destination Object and a possible error
+// # It returns the destination Object and a possible error
 //
 // Will only be called if src.Fs().Name() == f.Name()
 //
@@ -4392,9 +4392,9 @@ func (f *Fs) Copy(ctx context.Context, src fs.Object, remote string) (fs.Object,
 
 // CopyWithACL copies src with ACL to this remote using server-side copy operations.
 //
-// This is stored with the remote path given
+// # This is stored with the remote path given
 //
-// It returns the destination Object and a possible error
+// # It returns the destination Object and a possible error
 //
 // Will only be called if src.Fs().Name() == f.Name()
 //
@@ -5102,16 +5102,24 @@ func (g ByPermissionAndGranteeType) Len() int {
 func (g ByPermissionAndGranteeType) Less(i, j int) bool {
 	a, b := g[i], g[j]
 
-	if *a.Permission == *b.Permission {
-		if *a.Grantee.Type == *b.Grantee.Type {
-			return *a.Grantee.ID < *b.Grantee.ID
+	if strFromPtr(a.Permission) == strFromPtr(b.Permission) {
+		if strFromPtr(a.Grantee.Type) == strFromPtr(b.Grantee.Type) {
+			return strFromPtr(a.Grantee.ID) < strFromPtr(b.Grantee.ID)
 		} else {
-			return *a.Grantee.Type < *b.Grantee.Type
+			return strFromPtr(a.Grantee.Type) < strFromPtr(b.Grantee.Type)
 		}
 	} else {
-		return *a.Permission < *b.Permission
+		return strFromPtr(a.Permission) < strFromPtr(b.Permission)
 	}
 }
+
+func strFromPtr(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
 func (g ByPermissionAndGranteeType) Swap(i, j int) {
 	g[i], g[j] = g[j], g[i]
 }
@@ -5520,7 +5528,7 @@ func (o *Object) Open(ctx context.Context, options ...fs.OpenOption) (in io.Read
 		o.fs.warnCompressed.Do(func() {
 			fs.Logf(o, "Not decompressing 'Content-Encoding: gzip' compressed file. Use --s3-decompress to override")
 		})
-        }
+	}
 
 	objACL, err := o.getACL()
 	if err != nil {
@@ -6104,6 +6112,26 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 			return fmt.Errorf("multipart upload corrupted: Etag differ: expecting %s but got %s", wantETag, gotETag)
 		}
 		fs.Debugf(o, "Multipart upload Etag: %s OK", wantETag)
+	}
+
+	s3Obj, ok := src.(*Object)
+	if o.acl == nil && ok {
+		if acl, err := s3Obj.getACL(); err == nil {
+			srcBucketOwner, err := s3Obj.getBucketOwner()
+			if err != nil {
+				return fmt.Errorf("update: failed to get src bucket owner: %w", err)
+			}
+			dstBucketOwner, err := o.getBucketOwner()
+			if err != nil {
+				return fmt.Errorf("update: failed to set dst object acl: %w", err)
+			}
+			updatedACL := mappedOwnersACL(acl, srcBucketOwner, dstBucketOwner)
+			if err = o.setACL(updatedACL); err != nil {
+				fs.Errorf(s3Obj, "update: unable to set acl for dest obj: %v", err)
+			}
+		} else {
+			fs.Errorf(s3Obj, "unable to get acl for src obj: %v", err)
+		}
 	}
 
 	if o.acl != nil && len(o.acl.Grants) > 1 {
